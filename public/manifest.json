@@ -3,12 +3,13 @@
   "name": "Munshi - Shop Ledger & Partner Accounts",
   "icons": [
     {
-      "src": "/icon.svg",
+      "src": "./icon.svg",
       "type": "image/svg+xml",
       "sizes": "512x512"
     }
   ],
-  "start_url": "/",
+  "start_url": "./",
+  "scope": "./",
   "background_color": "#F6F1E4",
   "theme_color": "#1F2A44",
   "display": "standalone",
