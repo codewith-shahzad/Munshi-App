@@ -1,0 +1,173 @@
+{
+  "entities": {
+    "StockItem": {
+      "title": "StockItem",
+      "description": "Inventory stock items",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "unit": { "type": "string" },
+        "quantity": { "type": "number" },
+        "purchasePrice": { "type": "number" },
+        "date": { "type": "string" },
+        "billImageUrl": { "type": "string" },
+        "updatedAt": { "type": "number" },
+        "createdByRole": { "type": "string" }
+      },
+      "required": ["id", "name", "unit", "quantity", "purchasePrice", "updatedAt"]
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "Sales records for the shop",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "itemId": { "type": "string" },
+        "itemName": { "type": "string" },
+        "unit": { "type": "string" },
+        "quantity": { "type": "number" },
+        "purchasePrice": { "type": "number" },
+        "salePrice": { "type": "number" },
+        "totalSaleAmount": { "type": "number" },
+        "paymentType": { "type": "string", "enum": ["cash", "credit"] },
+        "shopkeeperName": { "type": "string" },
+        "date": { "type": "string" },
+        "invoiceNo": { "type": "string" },
+        "billImageUrl": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "createdByRole": { "type": "string" }
+      },
+      "required": ["id", "itemId", "itemName", "quantity", "purchasePrice", "salePrice", "totalSaleAmount", "paymentType", "createdAt"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Shop operational expenses",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "category": { "type": "string" },
+        "amount": { "type": "number" },
+        "note": { "type": "string" },
+        "details": { "type": "string" },
+        "date": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "createdByRole": { "type": "string" }
+      },
+      "required": ["id", "category", "amount", "createdAt"]
+    },
+    "UdhaarPayment": {
+      "title": "UdhaarPayment",
+      "description": "Credit loan payments received from customers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "shopkeeperName": { "type": "string" },
+        "amount": { "type": "number" },
+        "note": { "type": "string" },
+        "date": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "createdByRole": { "type": "string" }
+      },
+      "required": ["id", "shopkeeperName", "amount", "createdAt"]
+    },
+    "CapitalContribution": {
+      "title": "CapitalContribution",
+      "description": "Capital contributions invested in the shop",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "contributorName": { "type": "string" },
+        "amount": { "type": "number" },
+        "note": { "type": "string" },
+        "date": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "createdByRole": { "type": "string" }
+      },
+      "required": ["id", "contributorName", "amount", "createdAt"]
+    },
+    "Settlement": {
+      "title": "Settlement",
+      "description": "Settlement records for profit sharing among partners",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "periodStart": { "type": "number" },
+        "periodEnd": { "type": "number" },
+        "totalSales": { "type": "number" },
+        "totalCOGS": { "type": "number" },
+        "totalExpenses": { "type": "number" },
+        "netProfit": { "type": "number" },
+        "settledAt": { "type": "number" },
+        "settledByRole": { "type": "string" },
+        "note": { "type": "string" }
+      },
+      "required": ["id", "periodStart", "periodEnd", "totalSales", "totalExpenses", "netProfit", "settledAt"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Audit trail and activity log",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "action": { "type": "string" },
+        "entityType": { "type": "string" },
+        "entityName": { "type": "string" },
+        "details": { "type": "string" },
+        "oldValues": { "type": "string" },
+        "newValues": { "type": "string" },
+        "partnerRole": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["id", "action", "entityType", "entityName", "timestamp"]
+    },
+    "ShopSettings": {
+      "title": "ShopSettings",
+      "description": "Metadata and configuration settings for the shop",
+      "type": "object",
+      "properties": {
+        "shopName": { "type": "string" },
+        "shopPhone": { "type": "string" },
+        "shopAddress": { "type": "string" },
+        "invoiceFooterNote": { "type": "string" },
+        "settlementFrequency": { "type": "string" },
+        "shopCode": { "type": "string" }
+      },
+      "required": ["shopName"]
+    }
+  },
+  "firestore": {
+    "/shops/{shopCode}/stock/{stockId}": {
+      "schema": "StockItem",
+      "description": "Stock inventory for the shop"
+    },
+    "/shops/{shopCode}/sales/{saleId}": {
+      "schema": "Sale",
+      "description": "Sales records for the shop"
+    },
+    "/shops/{shopCode}/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Expenses for the shop"
+    },
+    "/shops/{shopCode}/udhaar_payments/{paymentId}": {
+      "schema": "UdhaarPayment",
+      "description": "Credit loan payments received from customers"
+    },
+    "/shops/{shopCode}/capital_contributions/{capitalId}": {
+      "schema": "CapitalContribution",
+      "description": "Capital contributions invested in the shop"
+    },
+    "/shops/{shopCode}/settlements/{settlementId}": {
+      "schema": "Settlement",
+      "description": "Settlement records for profit sharing among partners"
+    },
+    "/shops/{shopCode}/activity_logs/{logId}": {
+      "schema": "ActivityLog",
+      "description": "Audit trail and activity log"
+    },
+    "/shops/{shopCode}/meta/{docId}": {
+      "schema": "ShopSettings",
+      "description": "Metadata and configuration settings for the shop"
+    }
+  }
+}

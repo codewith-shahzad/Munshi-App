@@ -1,0 +1,50 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Catch-all deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Shop document and all its subcollections
+    match /shops/{shopCode} {
+      allow read, write: if shopCode.size() >= 3 && shopCode.size() <= 64;
+
+      match /meta/{docId} {
+        allow read, write: if shopCode.size() >= 3 && shopCode.size() <= 64;
+      }
+
+      match /stock/{stockId} {
+        allow read, write: if shopCode.size() >= 3 && shopCode.size() <= 64;
+      }
+
+      match /sales/{saleId} {
+        allow read, write: if shopCode.size() >= 3 && shopCode.size() <= 64;
+      }
+
+      match /expenses/{expenseId} {
+        allow read, write: if shopCode.size() >= 3 && shopCode.size() <= 64;
+      }
+
+      match /udhaar_payments/{paymentId} {
+        allow read, write: if shopCode.size() >= 3 && shopCode.size() <= 64;
+      }
+
+      match /capital_contributions/{capitalId} {
+        allow read, write: if shopCode.size() >= 3 && shopCode.size() <= 64;
+      }
+
+      match /settlements/{settlementId} {
+        allow read, write: if shopCode.size() >= 3 && shopCode.size() <= 64;
+      }
+
+      match /activity_logs/{logId} {
+        allow read, write: if shopCode.size() >= 3 && shopCode.size() <= 64;
+      }
+
+      match /{allSubcollections=**} {
+        allow read, write: if shopCode.size() >= 3 && shopCode.size() <= 64;
+      }
+    }
+  }
+}

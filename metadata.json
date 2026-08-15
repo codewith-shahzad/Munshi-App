@@ -1,0 +1,6 @@
+{
+  "name": "Munshi",
+  "description": "A shop ledger web app for small trading/kiryana businesses with multi-device live sync, stock, sales, udhaar, expenses, capital, settlements, PWA support, and full English/Urdu translation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
