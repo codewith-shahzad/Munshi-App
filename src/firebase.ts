@@ -1,10 +1,11 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, signInAnonymously } from 'firebase/auth';
 import { 
   initializeFirestore, 
   getFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
+  persistentSingleTabManager,
   Firestore 
 } from 'firebase/firestore';
 import firebaseConfigJson from '../firebase-applet-config.json';
@@ -29,15 +30,29 @@ try {
   firestoreInstance = initializeFirestore(app, {
     localCache: persistentLocalCache({
       tabManager: persistentMultipleTabManager()
-    })
+    }),
+    experimentalAutoDetectLongPolling: true
   }, databaseId);
 } catch {
-  // If already initialized
-  firestoreInstance = getFirestore(app, databaseId);
+  try {
+    firestoreInstance = initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentSingleTabManager({})
+      }),
+      experimentalAutoDetectLongPolling: true
+    }, databaseId);
+  } catch {
+    firestoreInstance = getFirestore(app, databaseId);
+  }
 }
 
 export const db: Firestore = firestoreInstance;
 export const auth = getAuth(app);
+
+// Auto-sign-in anonymously to establish valid auth session
+signInAnonymously(auth).catch((err) => {
+  console.warn('Anonymous auth initialized in offline/anonymous mode:', err?.message || err);
+});
 
 export const currentProjectId = firebaseConfigJson.projectId;
 export const currentDatabaseId = databaseId;

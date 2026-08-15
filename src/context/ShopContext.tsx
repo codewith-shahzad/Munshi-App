@@ -113,6 +113,25 @@ interface ShopContextType {
   restoreBackupData: (jsonString: string) => Promise<boolean>;
 }
 
+// Safe cleaner to guarantee no `undefined` value is EVER passed to Firestore setDoc/addDoc/updateDoc
+export function cleanForFirestore<T extends Record<string, any>>(obj: T): T {
+  if (obj === null || obj === undefined) {
+    return {} as T;
+  }
+  const result: any = Array.isArray(obj) ? [] : {};
+  for (const key of Object.keys(obj)) {
+    const val = (obj as any)[key];
+    if (val === undefined) {
+      continue; // completely omit undefined fields
+    } else if (val !== null && typeof val === 'object' && !(val instanceof Date)) {
+      result[key] = cleanForFirestore(val);
+    } else {
+      result[key] = val;
+    }
+  }
+  return result;
+}
+
 const ShopContext = createContext<ShopContextType | undefined>(undefined);
 
 export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -393,10 +412,10 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Settings Actions
   const updateShopSettings = async (newSettings: Partial<ShopSettings>) => {
     if (!shopCode) return;
-    const merged = { ...settings, ...newSettings, shopCode };
+    const merged = cleanForFirestore({ ...settings, ...newSettings, shopCode });
     const settingsDocRef = doc(db, 'shops', shopCode, 'meta', 'settings');
     await setDoc(settingsDocRef, merged);
-    setSettings(merged);
+    setSettings(merged as ShopSettings);
     await logActivity('edit', 'settlement', 'Shop Settings', `Updated shop configuration & partner profit ratios`);
   };
 
@@ -413,7 +432,7 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const cleanName = name.trim();
     if (!cleanName || quantity <= 0 || purchasePrice < 0) return;
 
-    const stockDate = date || new Date().toISOString().split('T')[0];
+    const stockDate = date?.trim() || new Date().toISOString().split('T')[0];
     const existingIndex = stockItems.findIndex(i => i.name.toLowerCase() === cleanName.toLowerCase());
 
     if (existingIndex >= 0) {
@@ -421,17 +440,19 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const newQty = existing.quantity + quantity;
       const docRef = doc(db, 'shops', shopCode, 'stock', existing.id);
       
-      const updated: Partial<StockItem> = {
+      const updated: Record<string, any> = {
         quantity: newQty,
         purchasePrice,
-        unit: unit.trim() || existing.unit,
+        unit: unit.trim() || existing.unit || 'pcs',
         date: stockDate,
-        ...(billImageUrl ? { billImageUrl } : {}),
         updatedAt: Date.now(),
-        createdByRole: activePartnerName
+        createdByRole: activePartnerName || 'Partner'
       };
+      if (billImageUrl && billImageUrl.trim()) {
+        updated.billImageUrl = billImageUrl.trim();
+      }
 
-      await updateDoc(docRef, updated);
+      await updateDoc(docRef, cleanForFirestore(updated));
       await logActivity(
         'edit', 
         'stock', 
@@ -442,19 +463,21 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       );
     } else {
       const docRef = doc(collection(db, 'shops', shopCode, 'stock'));
-      const newItem: StockItem = {
+      const newItem: Record<string, any> = {
         id: docRef.id,
         name: cleanName,
         unit: unit.trim() || 'pcs',
         quantity,
         purchasePrice,
         date: stockDate,
-        ...(billImageUrl ? { billImageUrl } : {}),
         updatedAt: Date.now(),
-        createdByRole: activePartnerName
+        createdByRole: activePartnerName || 'Partner'
       };
+      if (billImageUrl && billImageUrl.trim()) {
+        newItem.billImageUrl = billImageUrl.trim();
+      }
 
-      await setDoc(docRef, newItem);
+      await setDoc(docRef, cleanForFirestore(newItem));
       await logActivity(
         'create', 
         'stock', 
@@ -482,24 +505,28 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const docRef = doc(db, 'shops', shopCode, 'stock', id);
-    const updated: StockItem = {
-      ...existing,
+    const updated: Record<string, any> = {
+      id: existing.id,
       name: name.trim(),
-      unit: unit.trim(),
+      unit: unit.trim() || existing.unit || 'pcs',
       quantity,
       purchasePrice,
-      date: date || existing.date || new Date().toISOString().split('T')[0],
-      billImageUrl: billImageUrl !== undefined ? billImageUrl : existing.billImageUrl,
+      date: date?.trim() || existing.date || new Date().toISOString().split('T')[0],
       updatedAt: Date.now(),
-      createdByRole: activePartnerName
+      createdByRole: activePartnerName || existing.createdByRole || 'Partner'
     };
 
-    await setDoc(docRef, updated);
+    const finalBillUrl = billImageUrl !== undefined ? billImageUrl?.trim() : existing.billImageUrl;
+    if (finalBillUrl) {
+      updated.billImageUrl = finalBillUrl;
+    }
+
+    await setDoc(docRef, cleanForFirestore(updated));
     await logActivity(
       'edit',
       'stock',
       updated.name,
-      `Edited stock: ${quantity} ${unit} @ Rs. ${purchasePrice}${billImageUrl ? ' (updated purchase bill photo)' : ''}`,
+      `Edited stock: ${quantity} ${updated.unit} @ Rs. ${purchasePrice}${updated.billImageUrl ? ' (updated purchase bill photo)' : ''}`,
       `Name: ${existing.name}, Qty: ${existing.quantity}, Price: ${existing.purchasePrice}`,
       `Name: ${updated.name}, Qty: ${quantity}, Price: ${purchasePrice}`
     );
@@ -541,26 +568,27 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       throw new Error(`Sale quantity (${quantity}) exceeds available stock (${stockItem.quantity})!`);
     }
 
-    if (paymentType === 'credit' && (!shopkeeperName || !shopkeeperName.trim())) {
+    const cleanShopkeeper = shopkeeperName?.trim() || '';
+    if (paymentType === 'credit' && !cleanShopkeeper) {
       throw new Error('Shopkeeper/Customer name is required for credit (Udhaar) sales.');
     }
 
     // Deduct stock
     const stockDocRef = doc(db, 'shops', shopCode, 'stock', stockItem.id);
     const newStockQty = stockItem.quantity - quantity;
-    await updateDoc(stockDocRef, {
+    await updateDoc(stockDocRef, cleanForFirestore({
       quantity: newStockQty,
       updatedAt: Date.now()
-    });
+    }));
 
     // Create Sale doc
     const salesColRef = collection(db, 'shops', shopCode, 'sales');
     const newSaleRef = doc(salesColRef);
-    const saleDate = date || new Date().toISOString().split('T')[0];
+    const saleDate = date?.trim() || new Date().toISOString().split('T')[0];
     const totalSaleAmount = quantity * salePrice;
-    const invNo = customInvoiceNo || `INV-${Date.now().toString().slice(-6)}`;
+    const invNo = customInvoiceNo?.trim() || `INV-${Date.now().toString().slice(-6)}`;
 
-    const newSale: Sale = {
+    const newSale: Record<string, any> = {
       id: newSaleRef.id,
       itemId: stockItem.id,
       itemName: stockItem.name,
@@ -570,21 +598,28 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       salePrice,
       totalSaleAmount,
       paymentType,
-      shopkeeperName: paymentType === 'credit' ? shopkeeperName?.trim() : (shopkeeperName?.trim() || undefined),
       date: saleDate,
       invoiceNo: invNo,
-      ...(billImageUrl ? { billImageUrl } : {}),
       createdAt: Date.now(),
-      createdByRole: activePartnerName
+      createdByRole: activePartnerName || 'Partner'
     };
 
-    await setDoc(newSaleRef, newSale);
+    if (cleanShopkeeper) {
+      newSale.shopkeeperName = cleanShopkeeper;
+    }
+
+    const cleanBillUrl = billImageUrl?.trim();
+    if (cleanBillUrl) {
+      newSale.billImageUrl = cleanBillUrl;
+    }
+
+    await setDoc(newSaleRef, cleanForFirestore(newSale));
 
     await logActivity(
       'create',
       'sale',
       stockItem.name,
-      `Sale: ${quantity} ${stockItem.unit} @ Rs. ${salePrice} = Rs. ${totalSaleAmount} (${paymentType.toUpperCase()}${shopkeeperName ? ` to ${shopkeeperName}` : ''})${billImageUrl ? ' with attached slip/bill' : ''}`
+      `Sale: ${quantity} ${stockItem.unit} @ Rs. ${salePrice} = Rs. ${totalSaleAmount} (${paymentType.toUpperCase()}${cleanShopkeeper ? ` to ${cleanShopkeeper}` : ''})${cleanBillUrl ? ' with attached slip/bill' : ''}`
     );
   };
 
@@ -611,37 +646,54 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       throw new Error(`New sale quantity (${newQuantity}) exceeds available stock (${effectiveAvailableStock})!`);
     }
 
-    if (newPaymentType === 'credit' && (!newShopkeeperName || !newShopkeeperName.trim())) {
+    const cleanShopkeeper = newShopkeeperName !== undefined 
+      ? newShopkeeperName.trim() 
+      : (oldSale.shopkeeperName || '');
+
+    if (newPaymentType === 'credit' && !cleanShopkeeper) {
       throw new Error('Shopkeeper/Customer name is required for credit sales.');
     }
 
     const updatedStockQty = effectiveAvailableStock - newQuantity;
     const stockDocRef = doc(db, 'shops', shopCode, 'stock', stockItem.id);
-    await updateDoc(stockDocRef, {
+    await updateDoc(stockDocRef, cleanForFirestore({
       quantity: updatedStockQty,
       updatedAt: Date.now()
-    });
+    }));
 
     const saleDocRef = doc(db, 'shops', shopCode, 'sales', saleId);
-    const updatedSale: Sale = {
-      ...oldSale,
+    const updatedSale: Record<string, any> = {
+      id: oldSale.id,
+      itemId: oldSale.itemId,
+      itemName: oldSale.itemName,
+      unit: oldSale.unit,
       quantity: newQuantity,
+      purchasePrice: oldSale.purchasePrice,
       salePrice: newSalePrice,
       totalSaleAmount: newQuantity * newSalePrice,
       paymentType: newPaymentType,
-      shopkeeperName: newPaymentType === 'credit' ? newShopkeeperName?.trim() : (newShopkeeperName?.trim() || undefined),
-      date: newDate || oldSale.date,
-      billImageUrl: billImageUrl !== undefined ? billImageUrl : oldSale.billImageUrl,
-      createdByRole: activePartnerName
+      date: newDate?.trim() || oldSale.date || new Date().toISOString().split('T')[0],
+      invoiceNo: oldSale.invoiceNo || `INV-${Date.now().toString().slice(-6)}`,
+      createdAt: oldSale.createdAt || Date.now(),
+      createdByRole: activePartnerName || oldSale.createdByRole || 'Partner'
     };
 
-    await setDoc(saleDocRef, updatedSale);
+    if (cleanShopkeeper) {
+      updatedSale.shopkeeperName = cleanShopkeeper;
+    }
+
+    const finalBillUrl = billImageUrl !== undefined ? billImageUrl?.trim() : oldSale.billImageUrl;
+    if (finalBillUrl) {
+      updatedSale.billImageUrl = finalBillUrl;
+    }
+
+    await setDoc(saleDocRef, cleanForFirestore(updatedSale));
 
     await logActivity(
       'edit',
       'sale',
       oldSale.itemName,
-      `Edited sale for ${oldSale.itemName}: Qty ${oldSale.quantity}->${newQuantity}, Amount Rs. ${oldSale.totalSaleAmount}->${updatedSale.totalSaleAmount}${billImageUrl ? ' (updated sale slip photo)' : ''}`,
+      `Edited sale for ${oldSale.itemName}: Qty ${oldSale.quantity}->${newQuantity}, Amount Rs. ${oldSale.totalSaleAmount}->${updatedSale.totalSaleAmount}${finalBillUrl ? ' (updated sale slip photo)' : ''}`,
       `Qty: ${oldSale.quantity}, Amount: Rs. ${oldSale.totalSaleAmount}, Type: ${oldSale.paymentType}`,
       `Qty: ${newQuantity}, Amount: Rs. ${updatedSale.totalSaleAmount}, Type: ${newPaymentType}`
     );
@@ -656,10 +708,10 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (stockItem) {
       const stockDocRef = doc(db, 'shops', shopCode, 'stock', stockItem.id);
-      await updateDoc(stockDocRef, {
+      await updateDoc(stockDocRef, cleanForFirestore({
         quantity: stockItem.quantity + sale.quantity,
         updatedAt: Date.now()
-      });
+      }));
     }
 
     triggerUndo({
@@ -691,25 +743,36 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const expColRef = collection(db, 'shops', shopCode, 'expenses');
     const newDocRef = doc(expColRef);
-    const expDate = date || new Date().toISOString().split('T')[0];
+    const expDate = date?.trim() || new Date().toISOString().split('T')[0];
 
-    const newExpense: Expense = {
+    const newExpense: Record<string, any> = {
       id: newDocRef.id,
       category,
       amount,
-      note: note?.trim(),
-      details: category === 'Other' ? details?.trim() : undefined,
       date: expDate,
       createdAt: Date.now(),
-      createdByRole: activePartnerName
+      createdByRole: activePartnerName || 'Partner'
     };
 
-    await setDoc(newDocRef, newExpense);
+    const cleanNote = note?.trim();
+    if (cleanNote) {
+      newExpense.note = cleanNote;
+    }
+
+    // Only include details key when category is 'Other'
+    if (category === 'Other') {
+      const cleanDetails = details?.trim();
+      if (cleanDetails) {
+        newExpense.details = cleanDetails;
+      }
+    }
+
+    await setDoc(newDocRef, cleanForFirestore(newExpense));
     await logActivity(
       'create',
       'expense',
       category,
-      `Recorded expense: Rs. ${amount} (${category}${details ? `: ${details}` : ''})`
+      `Recorded expense: Rs. ${amount} (${category}${category === 'Other' && newExpense.details ? `: ${newExpense.details}` : ''})`
     );
   };
 
@@ -723,17 +786,29 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const docRef = doc(db, 'shops', shopCode, 'expenses', id);
-    const updated: Expense = {
-      ...existing,
+    const updated: Record<string, any> = {
+      id: existing.id,
       category,
       amount,
-      note: note?.trim(),
-      details: category === 'Other' ? details?.trim() : undefined,
-      date: date || existing.date,
-      createdByRole: activePartnerName
+      date: date?.trim() || existing.date || new Date().toISOString().split('T')[0],
+      createdAt: existing.createdAt || Date.now(),
+      createdByRole: activePartnerName || existing.createdByRole || 'Partner'
     };
 
-    await setDoc(docRef, updated);
+    const cleanNote = note !== undefined ? note.trim() : (existing.note || '');
+    if (cleanNote) {
+      updated.note = cleanNote;
+    }
+
+    // Only include details key when category is 'Other'
+    if (category === 'Other') {
+      const cleanDetails = details !== undefined ? details.trim() : (existing.details || '');
+      if (cleanDetails) {
+        updated.details = cleanDetails;
+      }
+    }
+
+    await setDoc(docRef, cleanForFirestore(updated));
     await logActivity(
       'edit',
       'expense',
@@ -767,19 +842,23 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const udhaarColRef = collection(db, 'shops', shopCode, 'udhaar_payments');
     const newDocRef = doc(udhaarColRef);
-    const payDate = date || new Date().toISOString().split('T')[0];
+    const payDate = date?.trim() || new Date().toISOString().split('T')[0];
 
-    const newPayment: UdhaarPayment = {
+    const newPayment: Record<string, any> = {
       id: newDocRef.id,
       shopkeeperName: name,
       amount,
-      note: note?.trim(),
       date: payDate,
       createdAt: Date.now(),
-      createdByRole: activePartnerName
+      createdByRole: activePartnerName || 'Partner'
     };
 
-    await setDoc(newDocRef, newPayment);
+    const cleanNote = note?.trim();
+    if (cleanNote) {
+      newPayment.note = cleanNote;
+    }
+
+    await setDoc(newDocRef, cleanForFirestore(newPayment));
     await logActivity(
       'create',
       'udhaar',
@@ -794,16 +873,21 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!existing) return;
 
     const docRef = doc(db, 'shops', shopCode, 'udhaar_payments', id);
-    const updated: UdhaarPayment = {
-      ...existing,
+    const updated: Record<string, any> = {
+      id: existing.id,
       shopkeeperName: shopkeeperName.trim(),
       amount,
-      note: note?.trim(),
-      date: date || existing.date,
-      createdByRole: activePartnerName
+      date: date?.trim() || existing.date || new Date().toISOString().split('T')[0],
+      createdAt: existing.createdAt || Date.now(),
+      createdByRole: activePartnerName || existing.createdByRole || 'Partner'
     };
 
-    await setDoc(docRef, updated);
+    const cleanNote = note !== undefined ? note.trim() : (existing.note || '');
+    if (cleanNote) {
+      updated.note = cleanNote;
+    }
+
+    await setDoc(docRef, cleanForFirestore(updated));
     await logActivity(
       'edit',
       'udhaar',
@@ -837,19 +921,23 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const capColRef = collection(db, 'shops', shopCode, 'capital_contributions');
     const newDocRef = doc(capColRef);
-    const capDate = date || new Date().toISOString().split('T')[0];
+    const capDate = date?.trim() || new Date().toISOString().split('T')[0];
 
-    const newCapital: CapitalContribution = {
+    const newCapital: Record<string, any> = {
       id: newDocRef.id,
       contributorName: name,
       amount,
-      note: note?.trim(),
       date: capDate,
       createdAt: Date.now(),
-      createdByRole: activePartnerName
+      createdByRole: activePartnerName || 'Partner'
     };
 
-    await setDoc(newDocRef, newCapital);
+    const cleanNote = note?.trim();
+    if (cleanNote) {
+      newCapital.note = cleanNote;
+    }
+
+    await setDoc(newDocRef, cleanForFirestore(newCapital));
     await logActivity(
       'create',
       'capital',
@@ -864,16 +952,21 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!existing) return;
 
     const docRef = doc(db, 'shops', shopCode, 'capital_contributions', id);
-    const updated: CapitalContribution = {
-      ...existing,
+    const updated: Record<string, any> = {
+      id: existing.id,
       contributorName: contributorName.trim(),
       amount,
-      note: note?.trim(),
-      date: date || existing.date,
-      createdByRole: activePartnerName
+      date: date?.trim() || existing.date || new Date().toISOString().split('T')[0],
+      createdAt: existing.createdAt || Date.now(),
+      createdByRole: activePartnerName || existing.createdByRole || 'Partner'
     };
 
-    await setDoc(docRef, updated);
+    const cleanNote = note !== undefined ? note.trim() : (existing.note || '');
+    if (cleanNote) {
+      updated.note = cleanNote;
+    }
+
+    await setDoc(docRef, cleanForFirestore(updated));
     await logActivity(
       'edit',
       'capital',
@@ -933,7 +1026,7 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const settlementsColRef = collection(db, 'shops', shopCode, 'settlements');
     const newDocRef = doc(settlementsColRef);
 
-    const newSettlement: Settlement = {
+    const newSettlement: Record<string, any> = {
       id: newDocRef.id,
       periodStart,
       periodEnd,
@@ -948,11 +1041,15 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       partner2Share: shares[1]?.amount || 0,
       partner3Share: shares[2]?.amount || 0,
       settledAt: periodEnd,
-      settledByRole: activePartnerName,
-      note: note?.trim()
+      settledByRole: activePartnerName || 'Partner'
     };
 
-    await setDoc(newDocRef, newSettlement);
+    const cleanNote = note?.trim();
+    if (cleanNote) {
+      newSettlement.note = cleanNote;
+    }
+
+    await setDoc(newDocRef, cleanForFirestore(newSettlement));
 
     const partnerSummaryText = shares.map(s => `${s.partnerName} (${s.percent}%): Rs. ${Math.round(s.amount)}`).join(', ');
 
@@ -972,7 +1069,7 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (entityType === 'stock') {
       const stockItem = item as StockItem;
-      await setDoc(doc(db, 'shops', shopCode, 'stock', stockItem.id), stockItem);
+      await setDoc(doc(db, 'shops', shopCode, 'stock', stockItem.id), cleanForFirestore(stockItem));
       await logActivity('create', 'stock', stockItem.name, `Undid deletion of stock item ${stockItem.name}`);
     } else if (entityType === 'sale') {
       const sale = item as Sale;
@@ -980,25 +1077,25 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const currentStock = stockItems.find(i => i.id === stockRestoration.itemId);
         if (currentStock) {
           const reDeductedQty = Math.max(0, currentStock.quantity - stockRestoration.quantityToRestore);
-          await updateDoc(doc(db, 'shops', shopCode, 'stock', currentStock.id), {
+          await updateDoc(doc(db, 'shops', shopCode, 'stock', currentStock.id), cleanForFirestore({
             quantity: reDeductedQty,
             updatedAt: Date.now()
-          });
+          }));
         }
       }
-      await setDoc(doc(db, 'shops', shopCode, 'sales', sale.id), sale);
+      await setDoc(doc(db, 'shops', shopCode, 'sales', sale.id), cleanForFirestore(sale));
       await logActivity('create', 'sale', sale.itemName, `Undid deletion of sale for ${sale.itemName}`);
     } else if (entityType === 'expense') {
       const exp = item as Expense;
-      await setDoc(doc(db, 'shops', shopCode, 'expenses', exp.id), exp);
+      await setDoc(doc(db, 'shops', shopCode, 'expenses', exp.id), cleanForFirestore(exp));
       await logActivity('create', 'expense', exp.category, `Undid deletion of expense`);
     } else if (entityType === 'udhaar') {
       const pay = item as UdhaarPayment;
-      await setDoc(doc(db, 'shops', shopCode, 'udhaar_payments', pay.id), pay);
+      await setDoc(doc(db, 'shops', shopCode, 'udhaar_payments', pay.id), cleanForFirestore(pay));
       await logActivity('create', 'udhaar', pay.shopkeeperName, `Undid deletion of udhaar payment`);
     } else if (entityType === 'capital') {
       const cap = item as CapitalContribution;
-      await setDoc(doc(db, 'shops', shopCode, 'capital_contributions', cap.id), cap);
+      await setDoc(doc(db, 'shops', shopCode, 'capital_contributions', cap.id), cleanForFirestore(cap));
       await logActivity('create', 'capital', cap.contributorName, `Undid deletion of capital contribution`);
     }
 
@@ -1037,37 +1134,37 @@ export const ShopProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       if (data.settings) {
-        await setDoc(doc(db, 'shops', shopCode, 'meta', 'settings'), { ...data.settings, shopCode });
+        await setDoc(doc(db, 'shops', shopCode, 'meta', 'settings'), cleanForFirestore({ ...data.settings, shopCode }));
       }
 
       if (Array.isArray(data.stockItems)) {
         for (const item of data.stockItems) {
-          if (item.id) await setDoc(doc(db, 'shops', shopCode, 'stock', item.id), item);
+          if (item.id) await setDoc(doc(db, 'shops', shopCode, 'stock', item.id), cleanForFirestore(item));
         }
       }
       if (Array.isArray(data.sales)) {
         for (const s of data.sales) {
-          if (s.id) await setDoc(doc(db, 'shops', shopCode, 'sales', s.id), s);
+          if (s.id) await setDoc(doc(db, 'shops', shopCode, 'sales', s.id), cleanForFirestore(s));
         }
       }
       if (Array.isArray(data.expenses)) {
         for (const e of data.expenses) {
-          if (e.id) await setDoc(doc(db, 'shops', shopCode, 'expenses', e.id), e);
+          if (e.id) await setDoc(doc(db, 'shops', shopCode, 'expenses', e.id), cleanForFirestore(e));
         }
       }
       if (Array.isArray(data.udhaarPayments)) {
         for (const u of data.udhaarPayments) {
-          if (u.id) await setDoc(doc(db, 'shops', shopCode, 'udhaar_payments', u.id), u);
+          if (u.id) await setDoc(doc(db, 'shops', shopCode, 'udhaar_payments', u.id), cleanForFirestore(u));
         }
       }
       if (Array.isArray(data.capitalContributions)) {
         for (const c of data.capitalContributions) {
-          if (c.id) await setDoc(doc(db, 'shops', shopCode, 'capital_contributions', c.id), c);
+          if (c.id) await setDoc(doc(db, 'shops', shopCode, 'capital_contributions', c.id), cleanForFirestore(c));
         }
       }
       if (Array.isArray(data.settlements)) {
         for (const st of data.settlements) {
-          if (st.id) await setDoc(doc(db, 'shops', shopCode, 'settlements', st.id), st);
+          if (st.id) await setDoc(doc(db, 'shops', shopCode, 'settlements', st.id), cleanForFirestore(st));
         }
       }
 

@@ -75,9 +75,22 @@ export const ExpensesView: React.FC = () => {
 
     try {
       if (editingExpense) {
-        await editExpense(editingExpense.id, category, aNum, note, details, expenseDate);
+        await editExpense(
+          editingExpense.id, 
+          category, 
+          aNum, 
+          note.trim() || undefined, 
+          category === 'Other' ? details.trim() : undefined, 
+          expenseDate
+        );
       } else {
-        await addExpense(category, aNum, note, details, expenseDate);
+        await addExpense(
+          category, 
+          aNum, 
+          note.trim() || undefined, 
+          category === 'Other' ? details.trim() : undefined, 
+          expenseDate
+        );
       }
       setIsModalOpen(false);
     } catch (err: any) {
