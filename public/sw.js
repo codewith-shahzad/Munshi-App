@@ -1,15 +1,20 @@
-const CACHE_NAME = 'munshi-pwa-v1';
+const CACHE_NAME = 'munshi-pwa-v2';
 const ASSETS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/icon.svg'
+  './',
+  './index.html',
+  './manifest.json',
+  './icon.svg',
+  './icon-192.png',
+  './icon-512.png',
+  './icon-512-maskable.png'
 ];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
+      return cache.addAll(ASSETS_TO_CACHE).catch((err) => {
+        console.warn('Service worker precache failed for some assets:', err);
+      });
     })
   );
   self.skipWaiting();
@@ -54,7 +59,7 @@ self.addEventListener('fetch', (event) => {
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request).catch(() => {
-        return caches.match('/index.html') || caches.match('/');
+        return caches.match('./index.html') || caches.match('./') || caches.match('/Munshi-App/index.html');
       })
     );
     return;
